@@ -1,4 +1,32 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Global Handlers ---
+    window.showToast = function(message) {
+        let toast = document.getElementById('app-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'app-toast';
+            toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:white;padding:10px 20px;border-radius:20px;font-size:0.9rem;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,0.2);opacity:0;transition:opacity 0.3s;pointer-events:none;';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+    };
+
+    window.handleLike = function(btn) {
+        btn.innerHTML = '<i class="fa-solid fa-thumbs-up" style="color:var(--primary)"></i>';
+        showToast('Feedback diterima. Terima kasih!');
+    };
+
+    window.handleDislike = function(btn) {
+        btn.innerHTML = '<i class="fa-solid fa-thumbs-down" style="color:var(--danger)"></i>';
+        showToast('Kami akan berusaha lebih baik lagi.');
+    };
+
+    window.handleRegenerate = function() {
+        showToast('Membuat ulang respons...');
+    };
+
     // --- Initialize Libraries ---
     initParticlesConfig('#6366f1');
     setupMarkdownRenderer();
@@ -20,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeSidebarBtn = document.getElementById('closeSidebarBtn');
     const searchInput = document.getElementById('searchInput');
     const newChatBtn = document.getElementById('newChatBtn');
+    const memoryBtn = document.getElementById('memoryBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const uploadBtn = document.getElementById('uploadBtn');
     
     // Suggestion Chips
     const suggestionChips = document.querySelectorAll('.suggestion-chip');
@@ -109,10 +140,50 @@ document.addEventListener('DOMContentLoaded', () => {
             if (newTheme === 'light') {
                 themeIcon.className = 'fa-solid fa-moon';
                 updateParticlesColor('#4f46e5');
+                if (highlightTheme) highlightTheme.href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css';
             } else {
                 themeIcon.className = 'fa-solid fa-sun';
                 updateParticlesColor('#6366f1');
+                if (highlightTheme) highlightTheme.href = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css';
             }
+        });
+    }
+
+    // --- Button Actions Logic ---
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.onchange = (e) => {
+                if (e.target.files.length > 0) {
+                    const fileName = e.target.files[0].name;
+                    if(isFirstMessage) removeEmptyState();
+                    appendUserMessage(`*File dilampirkan: \`${fileName}\`*`);
+                    simulateAIResponse(`Saya telah menerima file **${fileName}**. Analisis awal menunjukkan struktur data yang valid. Apa yang ingin Anda ekstrak atau modifikasi dari dokumen ini?`);
+                }
+            };
+            input.click();
+        });
+    }
+
+    if (memoryBtn) {
+        let memoryActive = true;
+        memoryBtn.addEventListener('click', () => {
+            memoryActive = !memoryActive;
+            const icon = memoryBtn.querySelector('i');
+            if (memoryActive) {
+                icon.style.color = 'var(--primary)';
+                showToast('AI Memory: Aktif');
+            } else {
+                icon.style.color = 'var(--text-secondary)';
+                showToast('AI Memory: Nonaktif');
+            }
+        });
+    }
+
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', () => {
+            window.location.href = 'pages/settings.html';
         });
     }
 
@@ -246,19 +317,9 @@ document.addEventListener('DOMContentLoaded', () => {
         sendBtn.setAttribute('disabled', 'true');
         sendBtn.classList.remove('active');
 
-        // Dynamic Mock Response based on input
-        let mockResponse = "";
-        const lowerText = text.toLowerCase();
-        
-        if (lowerText.includes('react') || lowerText.includes('landing page')) {
-            mockResponse = getReactMock();
-        } else if (lowerText.includes('python') || lowerText.includes('scrap')) {
-            mockResponse = getPythonMock();
-        } else {
-            mockResponse = getGeneralMock();
-        }
-
-        simulateAIResponse(mockResponse);
+        // Generate Smarter Response
+        const response = generateSmartResponse(text);
+        simulateAIResponse(response);
     }
 
     function simulateAIResponse(markdownText) {
@@ -280,9 +341,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="message-content markdown-body ai-response-content" style="display:none;" id="${messageId}-content"></div>
                     <div class="ai-actions" id="actions-${messageId}" style="display:none; gap:12px; margin-top:12px; align-items:center;">
                         <button class="action-btn" title="Copy" onclick="copyCode(this, '${messageId}-content')"><i class="fa-regular fa-copy"></i></button>
-                        <button class="action-btn" title="Regenerate"><i class="fa-solid fa-rotate-right"></i></button>
-                        <button class="action-btn" title="Like"><i class="fa-regular fa-thumbs-up"></i></button>
-                        <button class="action-btn" title="Dislike"><i class="fa-regular fa-thumbs-down"></i></button>
+                        <button class="action-btn" title="Regenerate" onclick="handleRegenerate()"><i class="fa-solid fa-rotate-right"></i></button>
+                        <button class="action-btn" title="Like" onclick="handleLike(this)"><i class="fa-regular fa-thumbs-up"></i></button>
+                        <button class="action-btn" title="Dislike" onclick="handleDislike(this)"><i class="fa-regular fa-thumbs-down"></i></button>
                     </div>
                 </div>
             </div>
@@ -304,29 +365,32 @@ document.addEventListener('DOMContentLoaded', () => {
             let i = 0;
             let currentText = "";
             
-            // Stream in chunks rather than characters for better markdown rendering performance
+            // Stream in larger chunks to improve performance and prevent browser lag (heavy highlight.js)
             currentStreamInterval = setInterval(() => {
                 if(!isGenerating) {
                     clearInterval(currentStreamInterval);
                     return;
                 }
                 
-                const chunkSize = Math.floor(Math.random() * 4) + 2;
+                // Increase chunk size significantly to finish faster and reduce layout thrashing
+                const chunkSize = Math.floor(Math.random() * 20) + 15;
                 currentText += markdownText.substring(i, i + chunkSize);
                 i += chunkSize;
                 
-                // Parse markdown incrementally. Note: Incremental markdown parsing can sometimes break code blocks until closed.
-                // For a robust app, a specialized streaming markdown parser is used, but marked handles it reasonably well.
+                // Parse markdown incrementally.
                 contentEl.innerHTML = marked.parse(currentText) + '<span class="streaming-cursor"></span>';
-                scrollToBottom();
+                
+                // Throttle scrolling slightly for performance
+                if (i % 2 === 0) scrollToBottom();
                 
                 if (i >= markdownText.length) {
                     clearInterval(currentStreamInterval);
                     contentEl.innerHTML = marked.parse(markdownText);
+                    scrollToBottom();
                     finishGenerating();
                 }
-            }, 10); // Fast streaming
-        }, 1200); // Thinking duration
+            }, 30); // Run every 30ms instead of 10ms
+        }, 800); // Reduce initial thinking duration
     }
 
     stopBtn.addEventListener('click', () => {
@@ -349,12 +413,91 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- Smarter AI Logic Engine ---
+    function generateSmartResponse(input) {
+        const text = input.toLowerCase();
+        
+        // Greetings
+        if (text.match(/^(halo|hai|hello|hi|pagi|siang|sore|malam)/)) {
+            return `Halo! Saya **NexAI**, asisten pintar ruang kerja Anda. Ada yang bisa saya bantu hari ini?\n\nAnda bisa meminta saya untuk:\n- Menulis kode (React, Python, HTML/CSS)\n- Memperbaiki *bug* pada proyek Anda\n- Menjelaskan konsep pemrograman`;
+        }
+        
+        // Identity / capability
+        if (text.includes('siapa kamu') || text.includes('kamu siapa') || text.includes('bisa apa')) {
+            return `Saya adalah **NexAI**, model *Advanced Agentic* yang dibangun untuk mendukung produktivitas tinggi. Saya dirancang khusus untuk memecahkan masalah pemrograman, menganalisis data, dan menyusun arsitektur sistem. \n\nCoba ketik instruksi spesifik, seperti: \`"Buatkan saya komponen React untuk tabel data"\`.`;
+        }
+
+        // Framework / React
+        if (text.includes('react') || text.includes('landing page') || text.includes('next.js') || text.includes('vue')) {
+            return getReactMock();
+        } 
+        // Python / Backend
+        if (text.includes('python') || text.includes('scrap') || text.includes('api') || text.includes('backend')) {
+            return getPythonMock();
+        }
+        // HTML/CSS/UI
+        if (text.includes('html') || text.includes('css') || text.includes('tombol') || text.includes('ui') || text.includes('tampilan')) {
+            return getHtmlCssMock();
+        }
+        // Generic / Code related
+        if (text.includes('kode') || text.includes('script') || text.includes('error') || text.includes('bug')) {
+            return getGeneralMock();
+        }
+
+        // Fallback for general conversation
+        return `Saya mendeteksi pertanyaan Anda:\n*"${input}"*\n\nSebagai asisten *coding*, saya dapat bekerja optimal jika Anda memberikan konteks teknis atau membagikan baris kode yang sedang Anda kerjakan. Namun, saya siap membantu merencanakan proyek, menganalisis masalah, atau sekadar berdiskusi.\n\nApakah ada studi kasus khusus atau bahasa pemrograman yang ingin kita bahas?`;
+    }
+
     // --- Mock Data Generators (Structured Output) ---
+    function getHtmlCssMock() {
+        return `Tentu! Berikut adalah contoh implementasi **HTML & CSS** modern dengan desain *Glassmorphism* yang saat ini sedang tren.
+        
+### 1. Struktur HTML
+\`\`\`html
+<div class="glass-card">
+  <h3>Modern UI</h3>
+  <p>Tampilan ini menggunakan efek blur (backdrop-filter) yang membuatnya terlihat premium.</p>
+  <button class="btn-primary">Pelajari Lebih Lanjut</button>
+</div>
+\`\`\`
+
+### 2. Styling CSS
+\`\`\`css
+.glass-card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    padding: 24px;
+    color: var(--text-primary); /* Menyesuaikan tema NexAI */
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+    background: #6366f1;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+.btn-primary:hover {
+    background: #4f46e5;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+}
+\`\`\`
+Silakan klik tombol **Preview** pada blok HTML di atas untuk melihat hasilnya secara langsung di jendela baru.`;
+    }
+
     function getGeneralMock() {
         return `Tentu, berikut adalah solusi untuk kebutuhan Anda yang telah disesuaikan dengan praktik terbaik (*best practices*).
 
 ### 1. Ringkasan Pendekatan
-Kita akan menggunakan **Vanilla JavaScript** dengan *Event Delegation* untuk memastikan performa tetap tinggi dan memori terkelola dengan baik, tanpa membebani DOM.
+Kita akan menggunakan **Vanilla JavaScript** dengan *Event Delegation* untuk memastikan performa tetap tinggi dan memori terkelola dengan baik.
 
 ### 2. Langkah Implementasi
 - Tangkap referensi elemen root induk.
